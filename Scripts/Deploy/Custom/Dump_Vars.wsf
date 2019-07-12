@@ -1,0 +1,10 @@
+<job id="ZTIConnect"> 
+   <script language="VBScript" src="..\ZTIUtility.vbs"/> 
+   <script language="VBScript">
+   Set oEnv = CreateObject("Microsoft.SMS.TSEnvironment") 
+   For each var in oEnv.GetVariables 
+      oLogging.CreateEntry var & " = " & oEnv(var), LogTypeInfo 
+   Next
+
+   </script> 
+</job> 

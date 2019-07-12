@@ -1,0 +1,11 @@
+** HP **
+** Fujitsu **
+** Lenovo **
+** Microsoft **
+** Dell **
+** ASUS **
+** Panasonic **
+** Virtual **
+VirtualBox
+Virtual Machine
+VMware Virtual Platform

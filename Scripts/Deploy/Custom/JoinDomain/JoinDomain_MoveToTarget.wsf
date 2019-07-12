@@ -1,0 +1,247 @@
+' // ***************************************************************************
+' // 
+' // JoinDomain_MoveToTarget
+' //
+' // File: JoinDomain_MoveToTarget.wsf
+' // 
+' // Version:   1
+' //
+' // Purpose:   Used to move computer account in AD to final OU
+' // 
+' // Usage:     cscript JoinDomain_MoveToTarget.wsf
+' //
+' // Created:   Brandon Hilgeman (11.01.2016)
+' // 			
+' // 
+' // ***************************************************************************
+
+<job id="JoinDomain">
+	<script language="VBScript" src="..\..\ZTIUtility.vbs"/>
+	<script language="VBScript">
+ 
+
+' Initialize objects and Variables
+sScriptDir = oFSO.GetParentFolderName(WScript.ScriptFullName)
+Dim sComputerName  	: sComputerName = oNetwork.ComputerName
+
+Set oWMI = GetObject("winmgmts:\\.\root\cimv2")
+Set oSysInfo = CreateObject("ADSystemInfo")
+
+'//----------------------------------------------------------------------------
+'//  Configuration
+'//----------------------------------------------------------------------------
+
+sDC = UCase(oEnvironment.Item("cDC"))
+sDomain = UCase(oEnvironment.Item("DomainAdminDomain")) ' Domain to logon
+sUser = oEnvironment.Item("DomainAdmin") ' Service account
+sPassword = oEnvironment.Item("DomainAdminPassword")' Service account logon password
+
+sImagingOU=UCase(oEnvironment.Item("cImagingOU"))
+sTargetOU=UCase(oEnvironment.Item("cTargetOU"))
+
+oLogging.CreateEntry "sDC: " & sDC, LogTypeInfo
+oLogging.CreateEntry "sDomain: " & sDomain, LogTypeInfo
+oLogging.CreateEntry "sUser: " & sUser, LogTypeInfo
+
+oLogging.CreateEntry "Imaging OU: " & sImagingOU, LogTypeInfo
+oLogging.CreateEntry "Target OU: " & sTargetOU, LogTypeInfo
+
+iRetry = 3
+iWait = 10000
+
+'//----------------------------------------------------------------------------
+'//  Variables
+'//----------------------------------------------------------------------------
+
+Const JOIN_DOMAIN = 1
+Const ACCT_CREATE = 2
+Const ACCT_DELETE = 4
+Const WIN9X_UPGRADE = 16
+Const DOMAIN_JOIN_IF_JOINED = 32
+Const JOIN_UNSECURE = 64
+Const MACHINE_PASSWORD_PASSED = 128
+Const DEFERRED_SPN_SET = 256
+Const INSTALL_INVOCATION = 262144
+
+Const ADS_SECURE_AUTHENTICATION = "&H1" 
+Const ADS_SERVER_BIND = "&H200" 
+
+'//----------------------------------------------------------------------------
+'//  Main
+'//----------------------------------------------------------------------------
+
+
+' Move to proper Root OU
+i = 1
+iCheck = False
+
+Do Until i > iRetry Or iCheck = True
+	oLogging.CreateEntry "MoveComputer: Attempt " & i, LogTypeInfo
+	iCheck = MoveComputer(sTargetOU)
+	If iCheck = False Then
+		Delay i
+	End If
+	i = i + 1
+Loop
+
+' If Move to genereated OU Fails - Move to Standard OU
+If iCheck = False Then	
+	i = 1
+	iCheck = False
+	oLogging.CreateEntry "MoveComputer (Fallback Location): Attempt " & i, LogTypeInfo
+	Do Until i > iRetry Or iCheck = True
+		Delay i
+		
+		oLogging.CreateEntry "MoveComputer: Attempt " & i, LogTypeInfo
+		iCheck = MoveComputer(sImagingOU)
+		i = i + 1
+	Loop	
+End If
+
+' Set Computer Description Field
+SetDescription "" & Year(Now) & "." & Month(Now) & "." & Day(Now) & ""
+
+
+'//----------------------------------------------------------------------------
+'//  Functions and Subroutines
+'//----------------------------------------------------------------------------
+Sub Delay(j)
+	If j > 1 Then
+		WScript.Sleep(iWait)
+	End If
+End Sub
+
+Sub SetDescription(sDescription)
+oLogging.CreateEntry "SetDescription: " & sDescription, LogTypeInfo
+	bError = False
+
+	' Connect to AD
+	On Error Resume Next
+	Set oConnection = CreateObject("ADODB.Connection")
+	Set oCommand = CreateObject("ADODB.Command")
+	
+	oConnection.Provider = "ADsDSOObject" 
+	'oConnection.Properties("User ID") = sDomain & "\" & sUser
+	oConnection.Properties("User ID") = sUser
+	oConnection.Properties("Password") = sPassword
+	oConnection.Properties("Encrypt Password") = True 
+	oConnection.Properties("ADSI Flag") = ADS_SERVER_BIND Or ADS_SECURE_AUTHENTICATION 
+	oConnection.Open "Active Directory Provider" 
+	
+	oCommand.ActiveConnection = oConnection
+	oCommand.Properties("Page Size") = 100 
+	oCommand.Properties("Timeout") = 30 
+	oCommand.Properties("Cache Results") = False
+	oCommand.CommandText = "Select DistinguishedName from 'LDAP://" & sDC & "' Where objectCategory='Computer' and Name='" & sComputerName & "'" 
+	
+	Set oRS = oCommand.Execute 
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "  Error Occured connecting to AD. " & vbnewline & "  RC:(" & Err.Number & ") " & Err.Description, LogTypeError
+		bError = True
+		Err.clear
+	Else
+		If Not (oRS.BOF and oRS.EOF) Then 
+		    oRS.MoveFirst 
+		    Do Until oRS.EOF 
+				sComputerDN = oRS.Fields("DistinguishedName").Value 
+
+				oLogging.CreateEntry "  Connecting to Object: " & "LDAP://" & sDC & "/" & sComputerDN, LogTypeInfo
+				
+		    	Set dso = GetObject("LDAP:") 
+		    	Set oComputer = dso.OpenDSObject("LDAP://" & sDC & "/" & sComputerDN,sUser, sPassword, 1)
+				oComputer.Put "description", sDescription
+				oComputer.SetInfo
+				
+		        oRS.MoveNext 
+		    Loop
+		End If 
+	End If
+	
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "  Error Occured while setting description. " & vbnewline & "  RC:(" & Err.Number & ") " & Err.Description, LogTypeError
+		bError = True
+		Err.clear
+	End If
+	
+	If bError = False Then
+		oLogging.CreateEntry "  Success: No Errors reported during set operation", LogTypeInfo
+	End If
+End Sub
+
+Function MoveComputer(sImagingOU)
+	MoveComputer = False
+	bError = False
+
+	' Connect to AD
+	On Error Resume Next
+	Set oConnection = CreateObject("ADODB.Connection")
+	Set oCommand = CreateObject("ADODB.Command")
+	
+	oConnection.Provider = "ADsDSOObject" 
+	'oConnection.Properties("User ID") = sDomain & "\" & sUser
+	oConnection.Properties("User ID") = sUser
+	oConnection.Properties("Password") = sPassword
+	oConnection.Properties("Encrypt Password") = True 
+	oConnection.Properties("ADSI Flag") = ADS_SERVER_BIND Or ADS_SECURE_AUTHENTICATION 
+	oConnection.Open "Active Directory Provider" 
+	
+	oCommand.ActiveConnection = oConnection
+	oCommand.Properties("Page Size") = 100 
+	oCommand.Properties("Timeout") = 30 
+	oCommand.Properties("Cache Results") = False
+	oCommand.CommandText = "Select DistinguishedName from 'LDAP://" & sDC & "' Where objectCategory='Computer' and Name='" & sComputerName & "'" 
+	
+	Set oRS = oCommand.Execute 
+	Set oNS = GetObject("LDAP:") 
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "  Error Occured connecting to AD. " & vbnewline & "  RC:(" & Err.Number & ") " & Err.Description, LogTypeError
+		bError = True
+		Err.clear
+	Else
+		If Not (oRS.BOF and oRS.EOF) Then 
+		    oRS.MoveFirst 
+		    Do Until oRS.EOF 
+		    	
+		    	'WScript.Echo oRS.Fields("DistinguishedName").Value 
+		    	sComputerDN = oRS.Fields("DistinguishedName").Value 
+		    	
+		    	iComma = InStr(sComputerDN,",")
+				sCurrentOU = Mid(sComputerDN,iComma+1)
+				
+				oLogging.CreateEntry "Old OU: " & UCase(sCurrentOU), LogTypeInfo
+				oLogging.CreateEntry "New OU: " & UCase(sImagingOU), LogTypeInfo
+				
+				'If current ou is different than target OU. Move object
+				If UCase(sCurrentOU) = UCase(sImagingOU) Then
+					oLogging.CreateEntry "  Success: verified computer is in correct OU", LogTypeInfo
+					MoveComputer = True
+				Else
+					oLogging.CreateEntry "Moving Computer to Correct OU", LogTypeInfo
+			    	Set dso = GetObject("LDAP:") 
+			    	Set oOU = dso.OpenDSObject("LDAP://" & sDC & "/" & sImagingOU,sUser, sPassword, 1)
+			    	Set oMoveComputer = oOU.MoveHere("LDAP://" & sComputerDN, vbNullstring)
+			    	WScript.sleep 5000 
+				End If 
+				
+		        oRS.MoveNext 
+		    Loop
+		End If 
+	End If
+	
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "  Error Occured while moving computer. " & vbnewline & "  RC:(" & Err.Number & ") " & Err.Description, LogTypeError
+		bError = True
+		Err.clear
+	End If
+	
+	If bError = False Then
+		oLogging.CreateEntry "  Success: No Errors reported during move operation", LogTypeInfo
+	End If
+End Function
+
+	</script>
+</job>

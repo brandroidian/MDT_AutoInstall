@@ -1,0 +1,10 @@
+E:\_Powershell_Projects\LTIWizard\LTIWizard\bin\Debug\LTIWizard.exe.config
+C:\Users\brand\Documents\LTIWizard\LTIWizard\bin\Debug\LTIWizard.exe.config
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\bin\Debug\LTIWizard.exe.config
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\obj\Debug\LTIWizard.csprojResolveAssemblyReference.cache
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\obj\Debug\MainWindow.g.cs
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\obj\Debug\App.g.cs
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\obj\Debug\LTIWizard_MarkupCompile.cache
+C:\Users\brand\Desktop\Cengage - customized LTIWizard folder\LTIWizard\LTIWizard\obj\Debug\LTIWizard_MarkupCompile.lref
+C:\Users\brand\Desktop\CustomerWorkFiles\_B\LTIWizard\LTIWizard\bin\Debug\LTIWizard.exe.config
+\\cm01\osd$\MDT_Toolkit\Scripts\Custom\LTIWizard\LTIWizard\bin\Debug\LTIWizard.exe.config

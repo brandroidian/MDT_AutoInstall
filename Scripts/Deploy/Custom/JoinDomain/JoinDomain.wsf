@@ -1,0 +1,280 @@
+' // ***************************************************************************
+' // 
+' // JoinDomain
+' //
+' // File: JoinDomain.wsf
+' // 
+' // Version:   1
+' //
+' // Purpose:   Used to delete the system from AD and rejoin to imaging container
+' // 
+' // Usage:     cscript JoinDomain.wsf
+' //
+' // Created:   Brandon Hilgeman (11.01.2016)
+' // 			
+' // 
+' // ***************************************************************************
+
+<job id="JoinDomain">
+<script language="VBScript" src="..\..\ZTIUtility.vbs"/>
+<script language="VBScript"> 
+
+' Initialize objects and Variables
+sScriptDir = oFSO.GetParentFolderName(WScript.ScriptFullName)
+Dim sComputerName  	: sComputerName = oNetwork.ComputerName
+
+Set oWMI = GetObject("winmgmts:\\.\root\cimv2")
+Set oSysInfo = CreateObject("ADSystemInfo")
+
+'//----------------------------------------------------------------------------
+'//  Configuration
+'//----------------------------------------------------------------------------
+
+
+sDC = UCase(oEnvironment.Item("cDC")) 'In case specific DC is needed for connection, else use same as sDomain
+sDomain = UCase(oEnvironment.Item("DomainAdminDomain")) ' Domain to logon
+sUser = oEnvironment.Item("DomainAdmin") ' Service account
+sPassword = oEnvironment.Item("DomainAdminPassword")' Service account logon password
+
+cImagingOU=UCase(oEnvironment.Item("cImagingOU"))
+
+oLogging.CreateEntry "sDC: " & sDC, LogTypeInfo
+oLogging.CreateEntry "sDomain: " & sDomain, LogTypeInfo
+oLogging.CreateEntry "sUser: " & sUser, LogTypeInfo
+
+
+oLogging.CreateEntry "Imaging OU: " & cImagingOU, LogTypeInfo
+
+
+iRetry = 2
+
+'//----------------------------------------------------------------------------
+'//  Variables
+'//----------------------------------------------------------------------------
+
+Const JOIN_DOMAIN = 1
+Const ACCT_CREATE = 2
+Const ACCT_DELETE = 4
+Const WIN9X_UPGRADE = 16
+Const DOMAIN_JOIN_IF_JOINED = 32
+Const JOIN_UNSECURE = 64
+Const MACHINE_PASSWORD_PASSED = 128
+Const DEFERRED_SPN_SET = 256
+Const INSTALL_INVOCATION = 262144
+
+Const ADS_SECURE_AUTHENTICATION = "&H1" 
+Const ADS_SERVER_BIND = "&H200" 
+
+'//----------------------------------------------------------------------------
+'//  Main
+'//----------------------------------------------------------------------------
+
+' Check to see if system is already on domain
+
+If CheckDomain = True Then
+	'WScript.Quit(0)
+End If
+
+' If Computer object exists (Move it to Imaging OU)
+i = 0
+iCheck = False
+
+Do Until i = iRetry Or iCheck = True
+	i = i + 1
+	oLogging.CreateEntry "MoveComputer: Attempt " & i, LogTypeInfo
+	iCheck = MoveComputer
+Loop
+
+' Join computer to domain
+i = 0
+Do Until i = iRetry Or CheckDomain = True
+	i = i + 1
+	oLogging.CreateEntry "JoinDomain: Attempt " & i, LogTypeInfo
+	iCheck = JoinDomain
+Loop
+
+
+'//----------------------------------------------------------------------------
+'//  Functions and Subroutines
+'//----------------------------------------------------------------------------
+Function JoinDomain
+	'On Error Resume Next
+	' Join Domain
+		Dim oComputer, iRet, Status
+		Set oComputer = GetObject("winmgmts:{impersonationLevel=Impersonate}!\\" & _
+		sComputerName & "\root\cimv2:Win32_ComputerSystem.Name='" & sComputerName & "'")
+		
+		oLogging.CreateEntry "Attempting to Join Domain ", LogTypeInfo
+		iRet = oComputer.JoinDomainOrWorkGroup(sDomain, sPassword, sDomain & "\" & sUser, cImagingOU,JOIN_DOMAIN + ACCT_CREATE + DOMAIN_JOIN_IF_JOINED)
+		JoinDomainErrors iRet
+	
+	' If Computer Errors because 'Computer Account Already Exists' Then Join under current OU
+	If iRet = 2224 Then
+		oLogging.CreateEntry "Attempting to Join Domain to Existing computer object", LogTypeInfo
+		cImagingOU = ""
+		iRet = oComputer.JoinDomainOrWorkGroup(sDomain, sPassword, sDomain & "\" & sUser, cImagingOU,JOIN_DOMAIN + ACCT_CREATE + DOMAIN_JOIN_IF_JOINED)
+		JoinDomainErrors iRet
+	End If
+	
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "Error Occured: "& Err.Number & " " & Err.Description, LogTypeError
+	End If
+	Err.Clear
+End Function
+
+Function MoveComputer
+	MoveComputer = False
+
+	' Connect to AD
+	On Error Resume Next
+	Set oConnection = CreateObject("ADODB.Connection")
+	Set oCommand = CreateObject("ADODB.Command")
+	
+	oConnection.Provider = "ADsDSOObject" 
+	'oConnection.Properties("User ID") = sDomain & "\" & sUser
+	oConnection.Properties("User ID") = sUser
+	oConnection.Properties("Password") = sPassword
+	oConnection.Properties("Encrypt Password") = True 
+	oConnection.Properties("ADSI Flag") = ADS_SERVER_BIND Or ADS_SECURE_AUTHENTICATION 
+	oConnection.Open "Active Directory Provider" 
+	
+	oCommand.ActiveConnection = oConnection
+	oCommand.Properties("Page Size") = 100 
+	oCommand.Properties("Timeout") = 30 
+	oCommand.Properties("Cache Results") = False
+	oCommand.CommandText = "Select DistinguishedName from 'LDAP://" & sDC & "' Where objectCategory='Computer' and Name='" & sComputerName & "'" 
+	
+	Set oRS = oCommand.Execute 
+	Set oNS = GetObject("LDAP:") 
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "Error Occured: "& Err.Number & " " & Err.Description, LogTypeError
+	Else
+		If Not (oRS.BOF and oRS.EOF) Then 
+		    oRS.MoveFirst 
+		    Do Until oRS.EOF 
+		    	
+		    	WScript.Echo oRS.Fields("DistinguishedName").Value 
+		    	sComputerDN = oRS.Fields("DistinguishedName").Value 
+		    	
+		    	iComma = InStr(sComputerDN,",")
+				sCurrentOU = Mid(sComputerDN,iComma+1)
+				
+				oLogging.CreateEntry "Old OU: " & sCurrentOU, LogTypeInfo
+				oLogging.CreateEntry "New OU: " & cImagingOU, LogTypeInfo
+				
+				'If current ou is different than target OU. Move object
+				If UCase(sCurrentOU) = UCase(cImagingOU) Then
+					oLogging.CreateEntry "Computer is already in the Correct OU", LogTypeInfo
+					MoveComputer = True
+				Else
+					oLogging.CreateEntry "Moving Computer to Correct OU", LogTypeInfo
+			    	Set dso = GetObject("LDAP:") 
+			    	Set oOU = dso.OpenDSObject("LDAP://" & sDC & "/" & cImagingOU,sUser, sPassword, 1)
+			    	Set oMoveComputer = oOU.MoveHere("LDAP://" & sComputerDN, vbNullstring)
+			    	WScript.sleep 5000 
+				End If 
+				
+		        oRS.MoveNext 
+		    Loop
+		End If 
+	End If
+
+	'Check for unhandled errors
+	If Err.Number <> 0 Then
+		oLogging.CreateEntry "Error Occured: "& Err.Number & " " & Err.Description, LogTypeError
+	End If
+	Err.Clear
+End Function
+
+Sub JoinDomainErrors(iRet)
+	If iRet = 0 Then
+		sStatus = "Success"
+	ElseIf iRet = 2 Then
+		sStatus = "Missing OU"
+	ElseIf iRet = 5 Then
+		sStatus = "Access denied"
+	ElseIf iRet = 53 Then
+		sStatus = "Network path not found"
+	ElseIf iRet = 87 Then
+		sStatus = "Parameter incorrect"
+	ElseIf iRet = 1326 Then
+		sStatus = "Logon failure, Incorrect user or pass"
+	ElseIf iRet = 1355 Then
+		sStatus = "Domain can not be contacted"
+	ElseIf iRet = 1909 Then
+		sStatus = "User account locked out"
+	ElseIf iRet = 2224 Then
+		sStatus = "Computer Account already exists"
+	ElseIf iRet = 2691 Then
+		sStatus = "Already joined"
+	Else
+		sStatus =  "Unknown Error " & iRet
+	End If	
+	
+	If iret = 0 Then 
+		oLogging.CreateEntry "Join domain status - Success: " & sStatus, LogTypeInfo
+	Else
+		oLogging.CreateEntry "Join domain status - Failure: " & sStatus, LogTypeError
+	End If
+
+End Sub
+
+Function CheckDomain
+' Check to see if system is already on domain
+CheckDomain = False
+
+Dim cItems, oItem, sCurrentDomain
+Set cItems = oWMI.ExecQuery( "Select * from Win32_ComputerSystem", ,48 )
+For Each oItem in cItems
+	If UCase(oItem.Domain) = UCase(sDomain) Then
+		oLogging.CreateEntry "Check Domain: System has already been joined to the domain", LogTypeInfo
+		CheckDomain = True
+	End If
+Next
+
+oLogging.CreateEntry "Check Domain: " & CheckDomain, LogTypeInfo
+End Function
+
+'Sub DeleteComputer
+'	If Len(sSerial) > 5 Then
+	'Delete Computer from AD
+	   
+	    'Find Computer in AD
+'		Set oConnection = CreateObject("ADODB.Connection")
+'		Set oCommand = CreateObject("ADODB.Command")
+		
+'		oConnection.Provider = "ADsDSOObject" 
+'		oConnection.Properties("User ID") = sDomain & "\" & sUser
+'		oConnection.Properties("Password") = sPassword
+'		oConnection.Properties("Encrypt Password") = True 
+'		oConnection.Properties("ADSI Flag") = ADS_SERVER_BIND Or ADS_SECURE_AUTHENTICATION 
+'		oConnection.Open "Active Directory Provider" 
+		
+'		oCommand.ActiveConnection = oConnection
+'		oCommand.Properties("Page Size") = 100 
+'		oCommand.Properties("Timeout") = 30 
+'		oCommand.Properties("Cache Results") = False
+'		oCommand.CommandText = "Select DistinguishedName from 'LDAP://" & sDomain & "' Where objectCategory='Computer' and Name='" & "*" & sSerial & "'" 
+		
+'		Set oRS = oCommand.Execute 
+'		Set oNS = GetObject("LDAP:") 
+'		If Not (oRS.BOF and oRS.EOF) Then 
+'		    oRS.MoveFirst 
+'		    Do Until oRS.EOF 
+		    	'Delete Computer
+'		    	sComputerDN = oRS.Fields("DistinguishedName").Value 
+'		    	oLogging.CreateEntry "Computer is already in AD.", LogTypeInfo
+'		    	oLogging.CreateEntry "Deleting object: " & sComputerDN, LogTypeInfo
+'		        set oComputer = oNS.OpenDSObject("LDAP://" & sDomain & "/" & sComputerDN, sUser, sPassword, ADS_SERVER_BIND Or ADS_SECURE_AUTHENTICATION) 
+'				oComputer.DeleteObject(0)
+'		        oRS.MoveNext 
+'		    Loop
+'		    WScript.sleep 60000 
+'		End If 
+'	End If
+'End Sub
+
+</script>
+</job>

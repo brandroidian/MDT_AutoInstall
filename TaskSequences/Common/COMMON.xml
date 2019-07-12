@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<sequence version="3.00" name="Custom Task Sequence" description="Sample Custom Task Sequence">
+  <group expand="true" name="Preinstall" description="" disable="false" continueOnError="false">
+    <action />
+    <condition>
+      <operator type="and">
+        <expression type="SMS_TaskSequence_VariableConditionExpression">
+          <variable name="Variable">Phase</variable>
+          <variable name="Operator">equals</variable>
+          <variable name="Value">Preinstall</variable>
+        </expression>
+      </operator>
+    </condition>
+    <step type="SMS_TaskSequence_RunCommandLineAction" name="Disable Store Updates (Offline)" description="" disable="false" continueOnError="true" startIn="" successCodeList="0 3010" runIn="WinPEandFullOS">
+      <defaultVarList>
+        <variable name="PackageID" property="PackageID" />
+        <variable name="RunAsUser" property="RunAsUser">false</variable>
+        <variable name="SMSTSRunCommandLineUserName" property="SMSTSRunCommandLineUserName"></variable>
+        <variable name="SMSTSRunCommandLineUserPassword" property="SMSTSRunCommandLineUserPassword"></variable>
+        <variable name="LoadProfile" property="LoadProfile">false</variable>
+      </defaultVarList>
+      <action>cscript.exe "%SCRIPTROOT%\Custom\DisableStoreUpdates\DisableStoreUpdates.wsf"</action>
+      <condition>
+        <expression type="SMS_TaskSequence_VariableConditionExpression">
+          <variable name="Variable">_SMSTSInWinPE</variable>
+          <variable name="Operator">equals</variable>
+          <variable name="Value">True</variable>
+        </expression>
+      </condition>
+    </step>
+  </group>
+  <group expand="true" name="State Restore" description="" disable="false" continueOnError="false">
+    <action />
+    <condition>
+      <operator type="and">
+        <expression type="SMS_TaskSequence_VariableConditionExpression">
+          <variable name="Variable">Phase</variable>
+          <variable name="Operator">equals</variable>
+          <variable name="Value">StateRestore</variable>
+        </expression>
+      </operator>
+    </condition>
+    <step type="SMS_TaskSequence_RunCommandLineAction" name="Copy CMTrace" description="" disable="false" continueOnError="false" startIn="" successCodeList="0 3010" runIn="WinPEandFullOS">
+      <defaultVarList>
+        <variable name="PackageID" property="PackageID" />
+        <variable name="RunAsUser" property="RunAsUser">false</variable>
+        <variable name="SMSTSRunCommandLineUserName" property="SMSTSRunCommandLineUserName"></variable>
+        <variable name="SMSTSRunCommandLineUserPassword" property="SMSTSRunCommandLineUserPassword"></variable>
+        <variable name="LoadProfile" property="LoadProfile">false</variable>
+      </defaultVarList>
+      <action>xcopy /q /y "%DEPLOYROOT%\ExtraFiles\x64\Windows\System32" "C:\Windows\System32"</action>
+      <condition></condition>
+    </step>
+    <step type="BDD_InstallRoles" name="Install .Net 3.5" description="" disable="false" continueOnError="false" runIn="WinPEandFullOS" successCodeList="0 3010">
+      <defaultVarList>
+        <variable name="OSRoleIndex" property="OSRoleIndex">13</variable>
+        <variable name="OSRoles" property="OSRoles"></variable>
+        <variable name="OSRoleServices" property="OSRoleServices"></variable>
+        <variable name="OSFeatures" property="OSFeatures">NetFx3</variable>
+      </defaultVarList>
+      <action>cscript.exe "%SCRIPTROOT%\ZTIOSRole.wsf"</action>
+      <condition></condition>
+    </step>
+    <step type="SMS_TaskSequence_RebootAction" name="Restart computer" description="" disable="false" continueOnError="false" runIn="WinPEandFullOS" successCodeList="0 3010">
+      <defaultVarList>
+        <variable name="SMSRebootMessage" property="Message" />
+        <variable name="SMSRebootTimeout" property="MessageTimeout">60</variable>
+        <variable name="SMSRebootTarget" property="Target" />
+      </defaultVarList>
+      <action>smsboot.exe /target:WinPE</action>
+      <condition></condition>
+    </step>
+    <step name="Windows Update (Pre-Application Installation)" disable="false" continueOnError="true" successCodeList="0 3010" description="" startIn="">
+      <action>cscript.exe "%SCRIPTROOT%\ZTIWindowsUpdate.wsf"</action>
+      <defaultVarList>
+        <variable name="RunAsUser" property="RunAsUser">false</variable>
+        <variable name="SMSTSRunCommandLineUserName" property="SMSTSRunCommandLineUserName"></variable>
+        <variable name="SMSTSRunCommandLineUserPassword" property="SMSTSRunCommandLineUserPassword"></variable>
+        <variable name="LoadProfile" property="LoadProfile">false</variable>
+      </defaultVarList>
+      <condition></condition>
+    </step>
+    <step type="BDD_InstallApplication" name="Install Microsoft C++ Redistributables" disable="false" continueOnError="false" successCodeList="0 3010" description="" startIn="">
+      <action>cscript.exe "%SCRIPTROOT%\ZTIApplications.wsf"</action>
+      <defaultVarList>
+        <variable name="ApplicationGUID" property="ApplicationGUID">{5df961f9-870e-4abd-9d76-fccc031f3302}</variable>
+        <variable name="ApplicationSuccessCodes" property="ApplicationSuccessCodes">0 3010</variable>
+      </defaultVarList>
+      <condition></condition>
+    </step>
+    <step type="BDD_InstallApplication" name="Install Office 365 2016" description="" disable="false" continueOnError="false" runIn="WinPEandFullOS" successCodeList="0 3010">
+      <defaultVarList>
+        <variable name="ApplicationGUID" property="ApplicationGUID">{c00e900a-25da-451c-ae41-98447aa01bf3}</variable>
+        <variable name="ApplicationSuccessCodes" property="ApplicationSuccessCodes">0 3010</variable>
+      </defaultVarList>
+      <action>cscript.exe "%SCRIPTROOT%\ZTIApplications.wsf"</action>
+      <condition></condition>
+    </step>
+    <step type="SMS_TaskSequence_RebootAction" name="Restart computer" description="" disable="false" continueOnError="false" runIn="WinPEandFullOS" successCodeList="0 3010">
+      <defaultVarList>
+        <variable name="SMSRebootMessage" property="Message"></variable>
+        <variable name="SMSRebootTimeout" property="MessageTimeout">60</variable>
+        <variable name="SMSRebootTarget" property="Target"></variable>
+      </defaultVarList>
+      <action>smsboot.exe /target:WinPE</action>
+    </step>
+    <step name="Windows Update (Post-Application Installation)" disable="false" continueOnError="true" successCodeList="0 3010" description="" startIn="">
+      <action>cscript.exe "%SCRIPTROOT%\ZTIWindowsUpdate.wsf"</action>
+      <defaultVarList>
+        <variable name="RunAsUser" property="RunAsUser">false</variable>
+        <variable name="SMSTSRunCommandLineUserName" property="SMSTSRunCommandLineUserName"></variable>
+        <variable name="SMSTSRunCommandLineUserPassword" property="SMSTSRunCommandLineUserPassword"></variable>
+        <variable name="LoadProfile" property="LoadProfile">false</variable>
+      </defaultVarList>
+    </step>
+  </group>
+</sequence>

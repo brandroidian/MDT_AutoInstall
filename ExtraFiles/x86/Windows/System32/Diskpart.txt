@@ -1,0 +1,3 @@
+Sel Disk 0
+Clean
+Exit
