@@ -1,0 +1,1 @@
+powershell.exe -executionpolicy bypass -file "%~dp0MDT_AutoInstall.ps1" -SvcAccountPassword P@ssw0rd -DSDrive C:\ -DeploymentType Capture -IncludeApplications -UpdateDeploymentShare

@@ -1,0 +1,9 @@
+[
+    {
+        "name": "Google Chrome Enterprise",
+        "version": "70.0.3538.11000",
+        "download": "https://dl.google.com/tag/s/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+        "filename": "googlechromestandaloneenterprise64.msi",
+        "install": "msiexec /i googlechromestandaloneenterprise64.msi /qb"
+    }
+]
